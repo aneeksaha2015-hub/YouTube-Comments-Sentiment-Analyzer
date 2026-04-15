@@ -10,7 +10,8 @@ import pickle
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.corpus import stopwords
 
-app = FastAPI(title="YT Sentiment Analyzer API", version="3.1 FIXED")
+# ───────────────── APP ─────────────────
+app = FastAPI(title="YT Sentiment Analyzer API", version="4.1 FIXED PRODUCTION")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,14 +20,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── GLOBALS ─────────────────────────────
+# ───────────────── ROOT (IMPORTANT FIX FOR RENDER) ─────────────────
+@app.get("/")
+def root():
+    return {
+        "status": "running",
+        "message": "YT Sentiment Analyzer API is LIVE",
+        "health": "/health",
+        "analyze": "/analyze"
+    }
+
+
+# ───────────────── GLOBALS ─────────────────
 sia = None
 model = None
 vectorizer = None
 STOPWORDS = set()
 
 
-# ─── STARTUP ─────────────────────────────
+# ───────────────── STARTUP ─────────────────
 @app.on_event("startup")
 def load_models():
     global sia, model, vectorizer, STOPWORDS
@@ -44,7 +56,7 @@ def load_models():
         vectorizer = pickle.load(f)
 
 
-# ─── REQUEST ─────────────────────────────
+# ───────────────── REQUEST MODELS ─────────────────
 class AnalyzeRequest(BaseModel):
     comments: List[str]
 
@@ -70,7 +82,7 @@ class AnalyzeResponse(BaseModel):
     keywords: List[str]
 
 
-# ─── CLEAN TEXT ───────────────────────────
+# ───────────────── CLEAN TEXT ─────────────────
 def clean_text(text: str) -> str:
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'http\S+', '', text)
@@ -78,8 +90,9 @@ def clean_text(text: str) -> str:
     return text
 
 
-# ─── FIXED HYBRID SENTIMENT ───────────────
+# ───────────────── HYBRID SENTIMENT ─────────────────
 def hybrid_sentiment(text: str):
+
     scores = sia.polarity_scores(text)
     compound = scores["compound"]
 
@@ -91,16 +104,16 @@ def hybrid_sentiment(text: str):
     ]
 
     if any(w in text_lower for w in sarcasm_words):
-        compound -= 0.4
+        compound -= 0.35
 
-    # strong rules first
+    # strong rule-based classification
     if compound >= 0.25:
         return "Positive", compound
 
     if compound <= -0.25:
         return "Negative", compound
 
-    # ML fallback
+    # ML fallback (neutral zone)
     X = vectorizer.transform([text])
     pred = model.predict(X)[0]
 
@@ -110,34 +123,38 @@ def hybrid_sentiment(text: str):
         return "Negative", min(compound, -0.05)
 
 
-# ─── KEYWORDS ─────────────────────────────
+# ───────────────── KEYWORDS ─────────────────
 def extract_keywords(comments: List[str], top_n: int = 15):
-    all_words = []
+    words = []
 
-    for comment in comments:
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', comment.lower())
-        filtered = [w for w in words if w not in STOPWORDS]
-        all_words.extend(filtered)
+    for c in comments:
+        tokens = re.findall(r'\b[a-zA-Z]{3,}\b', c.lower())
+        filtered = [t for t in tokens if t not in STOPWORDS]
+        words.extend(filtered)
 
-    counter = Counter(all_words)
+    counter = Counter(words)
 
-    generic = {
+    stop = {
         "video", "like", "just", "really", "good",
         "great", "also", "make", "know", "watch", "still"
     }
 
-    for g in generic:
-        counter.pop(g, None)
+    for s in stop:
+        counter.pop(s, None)
 
     return [w for w, _ in counter.most_common(top_n)]
 
 
-# ─── ROUTES ──────────────────────────────
+# ───────────────── HEALTH CHECK ─────────────────
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "Hybrid FIXED"}
+    return {
+        "status": "ok",
+        "model": "Hybrid FIXED PRODUCTION"
+    }
 
 
+# ───────────────── ANALYZE ROUTE ─────────────────
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
 
@@ -169,12 +186,12 @@ def analyze(req: AnalyzeRequest):
         ))
 
     total = len(results)
+
     if total == 0:
         raise HTTPException(status_code=422, detail="No valid comments")
 
     avg = total_score / total
 
-    # FIXED sorting
     pos_sorted = sorted(
         [r for r in results if r.sentiment == "Positive"],
         key=lambda x: x.score,

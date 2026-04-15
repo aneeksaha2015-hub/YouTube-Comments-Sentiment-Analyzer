@@ -1,4 +1,6 @@
-const API_BASE = "https://your-render-url.onrender.com";
+const API_BASE = "https://youtube-comments-sentiment-analyzer.onrender.com";
+// If testing locally use:
+// const API_BASE = "http://127.0.0.1:8000";
 
 document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('analyzeBtn').addEventListener('click', startAnalysis);
@@ -8,12 +10,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkServer();
 });
 
-// ─── UTIL (FIXED) ─────────────────────
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
-// ─── TAB CHECK ─────────────────────────
+// ───────────────── TAB CHECK ─────────────────
 async function checkTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -28,7 +26,8 @@ async function checkTab() {
     tab.title?.replace(' - YouTube', '') || 'YouTube Video';
 }
 
-// ─── SERVER CHECK ──────────────────────
+
+// ───────────────── SERVER CHECK ─────────────────
 async function checkServer() {
   const dot = document.getElementById('statusDot');
 
@@ -38,15 +37,16 @@ async function checkServer() {
 
     dot.classList.add('online');
     document.getElementById('footerText').textContent =
-      '✓ Backend connected · Hybrid AI';
-  } catch {
+      '✓ Backend connected · Live AI';
+  } catch (err) {
     dot.classList.add('error');
     document.getElementById('footerText').textContent =
       '✗ Backend offline';
   }
 }
 
-// ─── MAIN ANALYSIS (FIXED LOADING) ─────
+
+// ───────────────── MAIN ANALYSIS ─────────────────
 async function startAnalysis() {
 
   const btn = document.getElementById('analyzeBtn');
@@ -57,14 +57,15 @@ async function startAnalysis() {
 
   btn.disabled = true;
 
+  // reset UI
   errorBox.classList.remove('visible');
   results.classList.remove('visible');
 
-  // ✅ SHOW LOADING FIRST
+  // IMPORTANT: SHOW LOADING FIRST
   loading.classList.add('visible');
 
-  // 🔥 FORCE BROWSER TO RENDER UI BEFORE HEAVY TASKS
-  await delay(50);
+  // FORCE UI RENDER (fix loading not showing issue)
+  await new Promise(requestAnimationFrame);
 
   const steps = [
     'Loading YouTube page...',
@@ -86,15 +87,13 @@ async function startAnalysis() {
 
     const count = parseInt(document.getElementById('commentCount').value);
 
-    // scroll
+    // Scroll page to load comments
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => window.scrollTo(0, document.documentElement.scrollHeight)
     });
 
-    await delay(800); // 🔥 give YouTube time to load comments
-
-    // scrape
+    // Scrape comments
     const injected = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: scrapeComments,
@@ -104,15 +103,19 @@ async function startAnalysis() {
     const comments = injected?.[0]?.result || [];
 
     if (!comments.length) {
-      throw new Error("No comments found");
+      throw new Error("No comments found. Scroll manually and try again.");
     }
 
-    // backend call
+    // Call backend
     const response = await fetch(`${API_BASE}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ comments })
     });
+
+    if (!response.ok) {
+      throw new Error("Backend error");
+    }
 
     const data = await response.json();
 
@@ -136,7 +139,8 @@ async function startAnalysis() {
   }
 }
 
-// ─── SCRAPER ───────────────────────────
+
+// ───────────────── SCRAPER ─────────────────
 function scrapeComments(maxCount) {
   const els = document.querySelectorAll('#content-text');
   const comments = [];
@@ -149,7 +153,8 @@ function scrapeComments(maxCount) {
   return comments.slice(0, maxCount);
 }
 
-// ─── RENDER RESULTS ─────────────────────
+
+// ───────────────── RENDER RESULTS ─────────────────
 function renderResults(data) {
 
   const { summary, top_positive, top_negative, keywords } = data;
@@ -160,17 +165,20 @@ function renderResults(data) {
 
   const score = summary.avg_compound || 0;
 
+  // Score %
   document.getElementById('scoreValue').textContent =
     Math.round((score + 1) * 50) + '%';
 
   document.getElementById('scoreDesc').textContent =
     score >= 0 ? '🟢 Positive Audience' : '🔴 Negative Audience';
 
+  // Stats
   document.getElementById('totalCount').textContent = total;
   document.getElementById('avgScore').textContent = score.toFixed(3);
   document.getElementById('maxPos').textContent = pos;
   document.getElementById('maxNeg').textContent = neg;
 
+  // Bars
   const posPercent = total ? (pos / total) * 100 : 0;
   const negPercent = total ? (neg / total) * 100 : 0;
 
@@ -180,12 +188,14 @@ function renderResults(data) {
   document.getElementById('posCount').textContent = pos;
   document.getElementById('negCount').textContent = neg;
 
+  // Badges
   document.getElementById('posBadge').textContent =
     top_positive?.length || 0;
 
   document.getElementById('negBadge').textContent =
     top_negative?.length || 0;
 
+  // Keywords
   const kw = document.getElementById('keywords');
   kw.innerHTML = '';
   (keywords || []).forEach(k => {
@@ -195,8 +205,10 @@ function renderResults(data) {
     kw.appendChild(s);
   });
 
+  // Positive comments
   const posBox = document.getElementById('topPositive');
   posBox.innerHTML = '';
+
   (top_positive || []).forEach(c => {
     posBox.innerHTML += `
       <div class="comment-card pos">
@@ -205,8 +217,10 @@ function renderResults(data) {
       </div>`;
   });
 
+  // Negative comments
   const negBox = document.getElementById('topNegative');
   negBox.innerHTML = '';
+
   (top_negative || []).forEach(c => {
     negBox.innerHTML += `
       <div class="comment-card neg">
@@ -216,9 +230,11 @@ function renderResults(data) {
   });
 }
 
-// ─── RESET ──────────────────────────────
+
+// ───────────────── RESET ─────────────────
 function resetView() {
   document.getElementById('resultsSection').classList.remove('visible');
+  document.getElementById('errorBox').classList.remove('visible');
   document.getElementById('analyzeBtn').disabled = false;
   document.getElementById('resetBtn').style.display = 'none';
 }
