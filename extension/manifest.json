@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "YT Sentiment Analyzer Pro",
+  "version": "2.0",
+  "description": "Analyze YouTube comments sentiment in real-time using NLP",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YT Sentiment Analyzer Pro"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
