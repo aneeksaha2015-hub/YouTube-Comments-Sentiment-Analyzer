@@ -10,8 +10,7 @@ import pickle
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.corpus import stopwords
 
-# ───────────────── APP ─────────────────
-app = FastAPI(title="YT Sentiment Analyzer API", version="4.1 FIXED PRODUCTION")
+app = FastAPI(title="YT Sentiment Analyzer API", version="3.2 FIXED FULL")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,25 +19,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ───────────────── ROOT (IMPORTANT FIX FOR RENDER) ─────────────────
-@app.get("/")
-def root():
-    return {
-        "status": "running",
-        "message": "YT Sentiment Analyzer API is LIVE",
-        "health": "/health",
-        "analyze": "/analyze"
-    }
-
-
-# ───────────────── GLOBALS ─────────────────
+# ─── GLOBALS ─────────────────────────────
 sia = None
 model = None
 vectorizer = None
 STOPWORDS = set()
 
 
-# ───────────────── STARTUP ─────────────────
+# ─── STARTUP ─────────────────────────────
 @app.on_event("startup")
 def load_models():
     global sia, model, vectorizer, STOPWORDS
@@ -49,14 +37,23 @@ def load_models():
     sia = SentimentIntensityAnalyzer()
     STOPWORDS = set(stopwords.words('english'))
 
-    with open("model.pkl", "rb") as f:
-        model = pickle.load(f)
+    # 🔥 FIX: Safe loading (prevents crash on render)
+    try:
+        with open("model.pkl", "rb") as f:
+            model = pickle.load(f)
+    except Exception as e:
+        print("Model load failed:", e)
+        model = None
 
-    with open("vectorizer.pkl", "rb") as f:
-        vectorizer = pickle.load(f)
+    try:
+        with open("vectorizer.pkl", "rb") as f:
+            vectorizer = pickle.load(f)
+    except Exception as e:
+        print("Vectorizer load failed:", e)
+        vectorizer = None
 
 
-# ───────────────── REQUEST MODELS ─────────────────
+# ─── REQUEST ─────────────────────────────
 class AnalyzeRequest(BaseModel):
     comments: List[str]
 
@@ -82,7 +79,7 @@ class AnalyzeResponse(BaseModel):
     keywords: List[str]
 
 
-# ───────────────── CLEAN TEXT ─────────────────
+# ─── CLEAN TEXT ───────────────────────────
 def clean_text(text: str) -> str:
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'http\S+', '', text)
@@ -90,9 +87,8 @@ def clean_text(text: str) -> str:
     return text
 
 
-# ───────────────── HYBRID SENTIMENT ─────────────────
+# ─── FIXED HYBRID SENTIMENT ───────────────
 def hybrid_sentiment(text: str):
-
     scores = sia.polarity_scores(text)
     compound = scores["compound"]
 
@@ -103,58 +99,67 @@ def hybrid_sentiment(text: str):
         "nice job", "what a joke", "great job ruining"
     ]
 
+    # 🔥 FIX: Better sarcasm handling
     if any(w in text_lower for w in sarcasm_words):
         compound -= 0.35
 
-    # strong rule-based classification
+    # 🔥 FIX: Strong rule thresholds first
     if compound >= 0.25:
         return "Positive", compound
 
     if compound <= -0.25:
         return "Negative", compound
 
-    # ML fallback (neutral zone)
-    X = vectorizer.transform([text])
-    pred = model.predict(X)[0]
+    # 🔥 FIX: Safe ML fallback
+    if model is not None and vectorizer is not None:
+        try:
+            X = vectorizer.transform([text])
+            pred = model.predict(X)[0]
 
-    if pred == 1:
-        return "Positive", max(compound, 0.05)
-    else:
-        return "Negative", min(compound, -0.05)
+            if pred == 1:
+                return "Positive", max(compound, 0.05)
+            else:
+                return "Negative", min(compound, -0.05)
+        except Exception as e:
+            print("ML fallback failed:", e)
+
+    # fallback to VADER
+    return ("Positive" if compound >= 0 else "Negative", compound)
 
 
-# ───────────────── KEYWORDS ─────────────────
+# ─── KEYWORDS ─────────────────────────────
 def extract_keywords(comments: List[str], top_n: int = 15):
-    words = []
+    all_words = []
 
-    for c in comments:
-        tokens = re.findall(r'\b[a-zA-Z]{3,}\b', c.lower())
-        filtered = [t for t in tokens if t not in STOPWORDS]
-        words.extend(filtered)
+    for comment in comments:
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', comment.lower())
+        filtered = [w for w in words if w not in STOPWORDS]
+        all_words.extend(filtered)
 
-    counter = Counter(words)
+    counter = Counter(all_words)
 
-    stop = {
+    generic = {
         "video", "like", "just", "really", "good",
         "great", "also", "make", "know", "watch", "still"
     }
 
-    for s in stop:
-        counter.pop(s, None)
+    for g in generic:
+        counter.pop(g, None)
 
     return [w for w, _ in counter.most_common(top_n)]
 
 
-# ───────────────── HEALTH CHECK ─────────────────
+# ─── ROUTES ──────────────────────────────
+@app.get("/")
+def root():
+    return {"message": "API running"}   # 🔥 FIX: prevents 404 on Render
+
+
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "model": "Hybrid FIXED PRODUCTION"
-    }
+    return {"status": "ok", "model": "Hybrid FIXED FULL"}
 
 
-# ───────────────── ANALYZE ROUTE ─────────────────
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
 
@@ -168,7 +173,8 @@ def analyze(req: AnalyzeRequest):
 
     for raw in req.comments:
         text = clean_text(raw)
-        if not text:
+
+        if not text or len(text) < 3:
             continue
 
         label, score = hybrid_sentiment(text)
@@ -192,6 +198,7 @@ def analyze(req: AnalyzeRequest):
 
     avg = total_score / total
 
+    # 🔥 FIX: Proper sorting
     pos_sorted = sorted(
         [r for r in results if r.sentiment == "Positive"],
         key=lambda x: x.score,
