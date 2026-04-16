@@ -10,7 +10,7 @@ import pickle
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.corpus import stopwords
 
-app = FastAPI(title="YT Sentiment Analyzer API", version="3.2 FIXED FULL")
+app = FastAPI(title="YT Sentiment Analyzer API", version="3.2 FINAL")
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,23 +37,29 @@ def load_models():
     sia = SentimentIntensityAnalyzer()
     STOPWORDS = set(stopwords.words('english'))
 
-    # 🔥 FIX: Safe loading (prevents crash on render)
-    try:
-        with open("model.pkl", "rb") as f:
-            model = pickle.load(f)
-    except Exception as e:
-        print("Model load failed:", e)
-        model = None
+    with open("model.pkl", "rb") as f:
+        model = pickle.load(f)
 
-    try:
-        with open("vectorizer.pkl", "rb") as f:
-            vectorizer = pickle.load(f)
-    except Exception as e:
-        print("Vectorizer load failed:", e)
-        vectorizer = None
+    with open("vectorizer.pkl", "rb") as f:
+        vectorizer = pickle.load(f)
 
 
-# ─── REQUEST ─────────────────────────────
+# ─── ROOT FIX (IMPORTANT FOR RENDER) ──────
+@app.api_route("/", methods=["GET", "HEAD"])
+def root():
+    return {
+        "message": "YouTube Sentiment Analyzer API is running 🚀",
+        "status": "ok"
+    }
+
+
+# ─── HEALTH ──────────────────────────────
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": "Hybrid FIXED"}
+
+
+# ─── REQUEST MODELS ──────────────────────
 class AnalyzeRequest(BaseModel):
     comments: List[str]
 
@@ -87,8 +93,9 @@ def clean_text(text: str) -> str:
     return text
 
 
-# ─── FIXED HYBRID SENTIMENT ───────────────
+# ─── HYBRID SENTIMENT ─────────────────────
 def hybrid_sentiment(text: str):
+
     scores = sia.polarity_scores(text)
     compound = scores["compound"]
 
@@ -99,36 +106,28 @@ def hybrid_sentiment(text: str):
         "nice job", "what a joke", "great job ruining"
     ]
 
-    # 🔥 FIX: Better sarcasm handling
     if any(w in text_lower for w in sarcasm_words):
-        compound -= 0.35
+        compound -= 0.4
 
-    # 🔥 FIX: Strong rule thresholds first
     if compound >= 0.25:
         return "Positive", compound
 
     if compound <= -0.25:
         return "Negative", compound
 
-    # 🔥 FIX: Safe ML fallback
-    if model is not None and vectorizer is not None:
-        try:
-            X = vectorizer.transform([text])
-            pred = model.predict(X)[0]
+    # ML fallback
+    X = vectorizer.transform([text])
+    pred = model.predict(X)[0]
 
-            if pred == 1:
-                return "Positive", max(compound, 0.05)
-            else:
-                return "Negative", min(compound, -0.05)
-        except Exception as e:
-            print("ML fallback failed:", e)
-
-    # fallback to VADER
-    return ("Positive" if compound >= 0 else "Negative", compound)
+    if pred == 1:
+        return "Positive", max(compound, 0.05)
+    else:
+        return "Negative", min(compound, -0.05)
 
 
 # ─── KEYWORDS ─────────────────────────────
 def extract_keywords(comments: List[str], top_n: int = 15):
+
     all_words = []
 
     for comment in comments:
@@ -149,17 +148,7 @@ def extract_keywords(comments: List[str], top_n: int = 15):
     return [w for w, _ in counter.most_common(top_n)]
 
 
-# ─── ROUTES ──────────────────────────────
-@app.get("/")
-def root():
-    return {"message": "API running"}   # 🔥 FIX: prevents 404 on Render
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "model": "Hybrid FIXED FULL"}
-
-
+# ─── ANALYZE ROUTE ────────────────────────
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
 
@@ -174,10 +163,11 @@ def analyze(req: AnalyzeRequest):
     for raw in req.comments:
         text = clean_text(raw)
 
-        if not text or len(text) < 3:
+        if not text:
             continue
 
         label, score = hybrid_sentiment(text)
+
         total_score += score
 
         if label == "Positive":
@@ -196,9 +186,15 @@ def analyze(req: AnalyzeRequest):
     if total == 0:
         raise HTTPException(status_code=422, detail="No valid comments")
 
-    avg = total_score / total
+    # ✅ FIXED AVERAGE
+    avg = total_score / total if total > 0 else 0
 
-    # 🔥 FIX: Proper sorting
+    if avg > 0:
+        avg = min(avg, 1)
+    else:
+        avg = max(avg, -1)
+
+    # sorting
     pos_sorted = sorted(
         [r for r in results if r.sentiment == "Positive"],
         key=lambda x: x.score,
