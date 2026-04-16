@@ -166,39 +166,41 @@ async function startAnalysis() {
 // AUTO SCROLL + SCRAPER (FIXED CORE LOGIC)
 // ─────────────────────────────────────────────
 async function autoScrollAndScrape(maxCount) {
-
   const delay = ms => new Promise(res => setTimeout(res, ms));
 
-  let lastHeight = 0;
+  // First, scroll down a bit to trigger comment section load
+  window.scrollTo(0, 600);
+  await delay(2000); // Wait for comments to initialize
 
-  for (let i = 0; i < 20; i++) {
+  let collected = new Set();
+  let lastCount = 0;
+  let noChangeStreak = 0;
 
+  while (collected.size < maxCount && noChangeStreak < 4) {
+    // Scrape what's currently visible
+    const elements = document.querySelectorAll('#content-text');
+    elements.forEach(el => {
+      const text = el.innerText.trim();
+      if (text.length > 5) collected.add(text);
+    });
+
+    // If we have enough, stop
+    if (collected.size >= maxCount) break;
+
+    // Scroll down more
     window.scrollTo(0, document.documentElement.scrollHeight);
+    await delay(1800); // Give YouTube time to load more comments
 
-    await delay(1200);
-
-    let newHeight = document.documentElement.scrollHeight;
-
-    if (newHeight === lastHeight) break;
-
-    lastHeight = newHeight;
+    // Check if new comments appeared
+    if (collected.size === lastCount) {
+      noChangeStreak++;
+    } else {
+      noChangeStreak = 0;
+      lastCount = collected.size;
+    }
   }
 
-  const elements = document.querySelectorAll('#content-text');
-
-  const comments = [];
-
-  elements.forEach(el => {
-
-    const text = el.innerText.trim();
-
-    if (text.length > 5) {
-      comments.push(text);
-    }
-
-  });
-
-  return comments.slice(0, maxCount);
+  return Array.from(collected).slice(0, maxCount);
 }
 
 // ─────────────────────────────────────────────
