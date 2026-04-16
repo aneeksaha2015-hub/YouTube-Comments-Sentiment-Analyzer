@@ -170,7 +170,7 @@ async function autoScrollAndScrape(maxCount) {
 
   // First, scroll down a bit to trigger comment section load
   window.scrollTo(0, 600);
-  await delay(2000); // Wait for comments to initialize
+  await delay(4000); // Wait for comments to initialize
 
   let collected = new Set();
   let lastCount = 0;
@@ -189,7 +189,7 @@ async function autoScrollAndScrape(maxCount) {
 
     // Scroll down more
     window.scrollTo(0, document.documentElement.scrollHeight);
-    await delay(1800); // Give YouTube time to load more comments
+    await delay(4000); // Give YouTube time to load more comments
 
     // Check if new comments appeared
     if (collected.size === lastCount) {
