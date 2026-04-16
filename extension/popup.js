@@ -168,35 +168,31 @@ async function startAnalysis() {
 async function autoScrollAndScrape(maxCount) {
   const delay = ms => new Promise(res => setTimeout(res, ms));
 
-  // First, scroll down a bit to trigger comment section load
-  window.scrollTo(0, 400);
-  await delay(2000); // Wait for comments to initialize
+  // Trigger comment section load
+  window.scrollTo(0, 500);
+  await delay(3000);
 
   let collected = new Set();
-  let lastCount = 0;
   let noChangeStreak = 0;
 
-  while (collected.size < maxCount && noChangeStreak < 4) {
-    // Scrape what's currently visible
-    const elements = document.querySelectorAll('#content-text');
-    elements.forEach(el => {
+  while (collected.size < maxCount && noChangeStreak < 5) {
+
+    // Scroll to bottom
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    await delay(2500); // Wait for YouTube to load new batch
+
+    // Scrape AFTER the delay (not before)
+    const prevSize = collected.size;
+    document.querySelectorAll('#content-text').forEach(el => {
       const text = el.innerText.trim();
       if (text.length > 5) collected.add(text);
     });
 
-    // If we have enough, stop
-    if (collected.size >= maxCount) break;
-
-    // Scroll down more
-    window.scrollTo(0, document.documentElement.scrollHeight);
-    await delay(5000); // Give YouTube time to load more comments
-
-    // Check if new comments appeared
-    if (collected.size === lastCount) {
+    // Now check if anything new was added
+    if (collected.size === prevSize) {
       noChangeStreak++;
     } else {
-      noChangeStreak = 0;
-      lastCount = collected.size;
+      noChangeStreak = 0; // Reset streak on any progress
     }
   }
 
